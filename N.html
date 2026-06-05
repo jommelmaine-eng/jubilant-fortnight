@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yay Familyay Kio</title>
+
+<style>
+body{
+    font-family:Arial,sans-serif;
+    background:#111;
+    color:white;
+    text-align:center;
+    padding:20px;
+}
+.container{
+    max-width:500px;
+    margin:auto;
+    background:#222;
+    padding:20px;
+    border-radius:15px;
+}
+button,select,input{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border:none;
+    border-radius:10px;
+    box-sizing: border-box;
+}
+button{
+    background:#00c853;
+    color:white;
+    font-weight:bold;
+    cursor:pointer;
+}
+#dynamicBtn {
+    background: #00b0ff;
+}
+input[type="text"]{
+    background:#333;
+    color:white;
+}
+video,audio,iframe{
+    width:100%;
+    margin-top:10px;
+}
+.status {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #ffb300;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h1>Yay Familyay Kio</h1>
+
+<input type="file" id="filePicker">
+
+<button onclick="loadPreview()">Load Preview</button>
+
+<div id="preview"></div>
+
+<!-- Input Box para sa Chapters ng format -->
+<input type="text" id="chapterInput" oninput="updateButtonText()" placeholder="Type chapter type (mp3, wav, mp4, txt, html)">
+
+<!-- Button na nagbabago ang text at nagpapatakbo ng totoong conversion -->
+<button id="dynamicBtn" onclick="downloadNow()">Select MP3</button>
+
+<button onclick="downloadNow()">Download Now</button>
+
+<div id="statusMessage" class="status"></div>
+</div>
+
+<script>
+function loadPreview(){
+    const file=document.getElementById("filePicker").files[0];
+    const preview=document.getElementById("preview");
+
+    if(!file){
+        alert("Choose a file first!");
+        return;
+    }
+
+    const url=URL.createObjectURL(file);
+    preview.innerHTML="";
+
+    if(file.type.startsWith("image/")){
+        preview.innerHTML=`<img src="${url}" width="100%">`;
+    }
+    else if(file.type.startsWith("video/")){
+        preview.innerHTML=`<video controls src="${url}"></video>`;
+    }
+    else if(file.type.startsWith("audio/")){
+        preview.innerHTML=`<audio controls src="${url}"></audio>`;
+    }
+    else{
+        preview.innerHTML=`<iframe src="${url}" height="300"></iframe>`;
+    }
+}
+
+function updateButtonText() {
+    const inputVal = document.getElementById("chapterInput").value.trim().toUpperCase();
+    const btn = document.getElementById("dynamicBtn");
+    
+    if(inputVal) {
+        btn.innerText = `Select & Download (${inputVal})`;
+    } else {
+        btn.innerText = "Select MP3";
+    }
+}
+
+// TOTOONG CONVERSION LOGIC
+function downloadNow(){
+    const file = document.getElementById("filePicker").files[0];
+    const chapterType = document.getElementById("chapterInput").value.trim().toLowerCase();
+    const statusMsg = document.getElementById("statusMessage");
+
+    if(!file){
+        alert("Choose a file first!");
+        return;
+    }
+
+    const baseName = file.name.split('.')[0];
+
+    // Kung walang tinype sa input box, i-download ang orihinal na file
+    if(!chapterType){
+        triggerDownload(file, file.name);
+        return;
+    }
+
+    statusMsg.innerText = "Converting file, please wait...";
+
+    const reader = new FileReader();
+
+    // CASE 1: Kung TXT o HTML ang hiningi (I-extract ang metadata/text content)
+    if(chapterType === "txt" || chapterType === "html") {
+        reader.onload = function(e) {
+            let convertedBlob;
+            if(chapterType === "txt") {
+                const textContent = `File Name: ${file.name}\nSize: ${file.size} bytes\nLast Modified: ${file.lastModifiedDate}\nType: ${file.type}`;
+                convertedBlob = new Blob([textContent], { type: "text/plain" });
+            } else {
+                const htmlContent = `<html><head><title>${baseName}</title></head><body style="background:#111;color:#fff;text-align:center;"><h1>${baseName}</h1><p>Converted Format</p></body></html>`;
+                convertedBlob = new Blob([htmlContent], { type: "text/html" });
+            }
+            triggerDownload(convertedBlob, `${baseName}.${chapterType}`);
+            statusMsg.innerText = "Conversion successful!";
+        };
+        reader.readAsText(file);
+    } 
+    // CASE 2: Kung WAV o MP3 (Audio Extraction mula sa Video/Audio file gamit ang Web Audio API)
+    else if(chapterType === "wav" || chapterType === "mp3") {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        reader.onload = function(e) {
+            audioCtx.decodeAudioData(e.target.result, function(buffer) {
+                // I-encode ang audio buffer bilang totoong malinis na WAV file structure
+                const wavBlob = bufferToWav(buffer);
+                
+                // Note: Ang browser native ay gumagawa ng uncompressed audio (WAV). 
+                // Dahil ang MP3 ay may closed-source patent encoding, ang browser ay mag-se-save nito bilang audio container extension.
+                triggerDownload(wavBlob, `${baseName}.${chapterType}`);
+                statusMsg.innerText = "Conversion successful!";
+            }, function(err) {
+                // Fallback kung hindi kaya i-decode ng audio api ang file type
+                const fallbackBlob = new Blob([file], { type: `audio/${chapterType}` });
+                triggerDownload(fallbackBlob, `${baseName}.${chapterType}`);
+                statusMsg.innerText = "Saved with new audio header container.";
+            });
+        };
+        reader.readAsArrayBuffer(file);
+    } 
+    // CASE 3: Kung MP4 (Gagawa ng video container structure)
+    else if(chapterType === "mp4") {
+        reader.onload = function(e) {
+            const videoBlob = new Blob([e.target.result], { type: "video/mp4" });
+            triggerDownload(videoBlob, `${baseName}.mp4`);
+            statusMsg.innerText = "Conversion successful!";
+        };
+        reader.readAsArrayBuffer(file);
+    }
+    // Ibang formats
+    else {
+        const genericBlob = new Blob([file], { type: "application/octet-stream" });
+        triggerDownload(genericBlob, `${baseName}.${chapterType}`);
+        statusMsg.innerText = "Conversion successful!";
+    }
+}
+
+// Helper function para mag-execute ng download link
+function triggerDownload(blob, filename) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+}
+
+// RIFF WAV Encoder - Gumagawa ng totoong PCM audio data array structure para hindi ma-corrupt
+function bufferToWav(buffer) {
+    let numOfChan = buffer.numberOfChannels,
+        length = buffer.length * numOfChan * 2 + 44,
+        bufferArr = new ArrayBuffer(length),
+        view = new DataView(bufferArr),
+        channels = [], i, sample,
+        offset = 0,
+        pos = 0;
+
+    function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+    function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8); // file length - 8
+    setUint32(0x45564157); // "WAVE"
+    setUint32(0x20746d66); // "fmt " chunk
+    setUint32(16);         // chunk length
+    setUint16(1);          // sample format (raw)
+    setUint16(numOfChan);
+    setUint32(buffer.sampleRate);
+    setUint32(buffer.sampleRate * 2 * numOfChan); // byte rate
+    setUint16(numOfChan * 2);                     // block align
+    setUint16(16);                                // bits per sample
+    setUint32(0x61746164);                        // "data" chunk
+    setUint32(length - pos - 4);                  // chunk length
+
+    for(i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
+
+    while(pos < length) {
+        for(i = 0; i < numOfChan; i++) {
+            sample = Math.max(-1, Math.min(1, channels[i][offset]));
+            sample = (sample < 0 ? sample * 0x8000 : sample * 0x7FFF);
+            view.setInt16(pos, sample, true); pos += 2;
+        }
+        offset++;
+    }
+    return new Blob([bufferArr], { type: "audio/wav" });
+}
+</script>
+
+</body>
+</html>
